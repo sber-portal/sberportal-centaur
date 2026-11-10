@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.ravn.homeproxy">
+
+    <uses-sdk
+        android:minSdkVersion="28"
+        android:targetSdkVersion="28" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Centaur Home Proxy"
+        android:supportsRtl="true">
+
+        <!-- The real HOME target. Sber's onCloseGesture starts HOME; Centaur's
+             own ChironSplashActivity recreates MainActivity and takes seconds,
+             so this invisible proxy resumes MainActivity directly instead. -->
+        <activity
+            android:name=".HomeActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Waits for /dev/rtc0 at boot, then starts Centaur. -->
+        <service
+            android:name=".WaitService"
+            android:exported="false" />
+
+    </application>
+
+</manifest>
