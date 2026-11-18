@@ -7,7 +7,7 @@ Android 9, StarOS 1.102.34) в колонку с **Алисой Яндекса**
 
 Требуется постоянный root (`adb root` → `uid=0`) — см.
 **[sberportal-root](https://github.com/sber-portal/sberportal-root)**.
-Пошаговая установка с нуля — **[sberportal](https://github.com/sber-portal/sberportal)**.
+Обзор (root и выбор между Centaur и OpenStation) — **[sberportal](https://github.com/sber-portal/sberportal)**.
 
 ## Версия Centaur
 
@@ -46,11 +46,28 @@ versionCode 1795 (ниже), другая архитектура приложе�
 
 ## Установка
 
+Два пути: готовый установщик или всё руками.
+
+### Установщик (один файл)
+
+[`installer/`](installer/) — Python-скрипт (или бинарник для Linux/macOS/Windows).
+Он спрашивает IP портала, проверяет `identity/` (`private.pem` + `device_id`),
+проверяет ADB, получает root, скачивает и ставит Centaur с моделью, top sheet и
+клавиатуру (по желанию), а в конце предлагает удалить временные файлы.
+
+```bash
+python3 installer/portal_installer.py      # или ./installer/run-macos.command
+```
+
+Готовые бинарники — в [релизе v1](https://github.com/sber-portal/sberportal-centaur/releases/tag/v1).
+
+### Вручную
+
 ```bash
 # 0) root уже работает (см. sberportal-root)
 adb root && adb shell id          # uid=0
 
-# 1) APK Centaur с голосом и шторкой — из релиза репозитория sberportal:
+# 1) APK Centaur с голосом и шторкой — из релиза этого репозитория (v1):
 #    centaur-voice-patched.apk  (или собрать самому, см. patch/README.md)
 
 # 2) патчи под свою версию APK (если собираете сами)
