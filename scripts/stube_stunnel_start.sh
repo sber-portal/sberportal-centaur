@@ -1,79 +1,85 @@
 #!/system/bin/sh
-# Keep StarTube's own stunnel tunnel alive.
+# Start StarTube's TLS-PSK tunnel (Sber's SOCKS5 proxy) outside the app.
 #
-# ru.sberdevices.startube has a built-in DPI-bypass path: stunnel client on
-# 127.0.0.1:11085 -> star.edgehaul.xyz:4433 (PSK), which the app uses as a
-# "blocked resource" proxy. The remote side resolves YouTube itself, so no DNS
-# or NetFix is needed for it.
+# Kept for Centaur: StarTube's own stunnel is killed by the app right after it
+# starts (race in ProxyUpdater), so the tunnel is started from its cached
+# config and kept alive by stube_stunnel_watchdog.sh.
 #
-# Why this script exists: the app's ProxyUpdater starts its stunnel and then
-# terminates it almost immediately (race: "Stunnel started" -> "Terminated"),
-# so the proxy answers ECONNREFUSED and YouTube never loads. Here the same
-# stunnel is started once, from the app's own config/PSK, and kept running.
+# ru.sberdevices.startube has a built-in DPI bypass: an stunnel client on
+# 127.0.0.1:<localPort> that speaks TLS-PSK to Sber's proxy and lets the far
+# side resolve and dial YouTube. The app starts that stunnel itself and kills
+# it right away (race in ProxyUpdater), so the proxy is usually not there and
+# the app reports "нет доступа к сервису YouTube".
 #
-# Started by sber_guard.sh (CentaurSwipeWatcher) at every boot, as root.
-# Re-running is safe: it exits if stunnel is already up.
+# Here the same stunnel is started once, from the app's own cached config
+# (PSK, target, local port), and kept alive by stube_stunnel_watchdog.sh.
+#
+# Safe to run repeatedly: exits when something already listens on the port.
 
 PKG=ru.sberdevices.startube
 DIR=/data/local/tmp/stube
 CONF=$DIR/stunnel.conf
 LOG=$DIR/stunnel.log
+DEFAULT_PORT=11085
 
-# Wait for boot and for a default route: starting before Wi-Fi is up makes
-# stunnel fail to resolve/connect and the app then restarts it anyway.
 i=0
 while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ $i -lt 60 ]; do
     sleep 2; i=$((i + 1))
 done
 i=0
-# The default route lives in per-network tables on Android, so check that the
-# Wi-Fi interface has routes at all.
 while ! ip route 2>/dev/null | grep -q 'dev wlan0' && [ $i -lt 30 ]; do
     sleep 2; i=$((i + 1))
 done
 
-pidof stube_tunnel >/dev/null 2>&1 && exit 0
-pidof libstunnel.so >/dev/null 2>&1 && exit 0
-
-BASE=$(pm path $PKG 2>/dev/null | sed 's/^package://; s#/base.apk$##')
+BASE=$(pm path $PKG 2>/dev/null | head -1 | sed 's/^package://; s#/base.apk$##')
 [ -n "$BASE" ] || exit 0
 [ -x "$BASE/lib/arm/libstunnel.so" ] || exit 0
 
-mkdir -p "$DIR"
+PREFS=/data/data/$PKG/shared_prefs/APP_PREFS.xml
+[ -f "$PREFS" ] || exit 0
 
-# Keep the helper binary in sync with the installed app (it is an ELF exe
-# stored as a native library; exec from the app lib dir is not reliable).
+# The cached config is JSON inside XML, so the quotes are &quot;.
+CFG=$(sed 's/&quot;/"/g' "$PREFS" 2>/dev/null)
+PSK=$(printf '%s' "$CFG" | grep -o '"pskKey":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')
+TARGET=$(printf '%s' "$CFG" | grep -o '"target":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')
+PORT=$(printf '%s' "$CFG" | grep -o '"localPort":"[0-9]*"' | head -1 | sed 's/.*:"//; s/"$//')
+[ -n "$PSK" ] || exit 0
+[ -n "$TARGET" ] || TARGET=st-ru1.sbrdvc.ru:4433
+[ -n "$PORT" ] || PORT=$DEFAULT_PORT
+# Optional pin of a working address; the service is multi-homed.
+[ -f "$DIR/target" ] && TARGET=$(cat "$DIR/target" 2>/dev/null)
+
+# Is anything already listening on the port? (hex port, state 0A = LISTEN)
+PORT_HEX=$(printf '%04X' "$PORT")
+if awk -v p=":$PORT_HEX" '$2 ~ p && $4 == "0A" {found=1} END {exit !found}' /proc/net/tcp 2>/dev/null; then
+    exit 0
+fi
+
+# The app may have left its own stunnel alive while it holds no listening
+# socket; it would keep the port in a broken state, so drop it before binding.
+APP_STUNNELS=$(pidof libstunnel.so 2>/dev/null)
+[ -n "$APP_STUNNELS" ] && kill $APP_STUNNELS 2>/dev/null
+
+mkdir -p "$DIR"
 if [ ! -x "$DIR/stube_tunnel" ] || [ "$BASE/lib/arm/libstunnel.so" -nt "$DIR/stube_tunnel" ]; then
     cp "$BASE/lib/arm/libstunnel.so" "$DIR/stube_tunnel" 2>/dev/null || exit 0
 fi
 chmod 755 "$DIR/stube_tunnel"
 
-PREFS=/data/data/$PKG/shared_prefs/APP_PREFS.xml
-[ -f "$PREFS" ] || exit 0
-
-# PSK secret (identity:key) and target are stored in the app's cached config.
-PSK=$(grep -o 'startube3:[a-f0-9]*' "$PREFS" 2>/dev/null | head -1)
-[ -n "$PSK" ] || exit 0
-TARGET=$(grep -o '"target":"[^"]*"' "$PREFS" 2>/dev/null | head -1 | sed 's/.*:"//; s/"$//')
-PORT=$(grep -o '"localPort":"[0-9]*"' "$PREFS" 2>/dev/null | head -1 | sed 's/.*:"//; s/"$//')
-[ -n "$TARGET" ] || TARGET=star.edgehaul.xyz:4433
-[ -n "$PORT" ] || PORT=11085
-# The service is multi-homed and some addresses are dead; DNS order changes.
-# An optional pin in $DIR/target (host:port) overrides the cached target.
-[ -f "$DIR/target" ] && TARGET=$(cat "$DIR/target" 2>/dev/null)
-
+printf '%s' "$PORT" > "$DIR/port"
 printf '%s' "$PSK" > "$DIR/psk.txt" || exit 0
 chmod 600 "$DIR/psk.txt"
 {
-    echo "debug = 3"
+    echo "debug = 4"
+    echo "syslog = no"
     echo "foreground = yes"
     echo "[auto-proxy-0]"
     echo "client = yes"
     echo "accept = $PORT"
     echo "connect = $TARGET"
-    echo "PSKSecrets = $DIR/psk.txt"
+    echo "PSKsecrets = $DIR/psk.txt"
 } > "$CONF" || exit 0
 chmod 600 "$CONF"
 
 cd "$DIR" || exit 0
-nohup ./stube_tunnel "$CONF" >/dev/null 2>>"$LOG" </dev/null &
+nohup ./stube_tunnel "$CONF" >>"$LOG" 2>&1 </dev/null &

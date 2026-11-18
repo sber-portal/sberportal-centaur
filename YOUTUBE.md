@@ -31,9 +31,10 @@ StarTube умеет обходить блокировки сам: `stunnel` на
 ## Как работает
 
 1. `stube_stunnel_start.sh` берёт из данных StarTube (`APP_PREFS.xml`) PSK
-   (`startube3:<hex>`), target и localPort, собирает `stunnel.conf` в
-   `/data/local/tmp/stube/` и запускает бинарник `libstunnel.so` под именем
-   `stube_tunnel`. Имя важно: приложение убивает процесс `libstunnel.so`, а
+   (`main:<hex>`; в старых сборках было `startube3:<hex>`), target и localPort,
+   собирает `stunnel.conf` в `/data/local/tmp/stube/` и запускает бинарник
+   `libstunnel.so` под именем `stube_tunnel`. Если приложение уже подняло свою
+   копию и она слушает порт, скрипт ничего не делает. Имя важно: приложение убивает процесс `libstunnel.so`, а
    чужое имя не трогает.
 2. `stube_stunnel_watchdog.sh` каждые 3 с проверяет, что слушает 11085, и
    перезапускает туннель, если его нет. Pid-файл привязан к `boot_id`, чтобы
