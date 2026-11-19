@@ -1,6 +1,25 @@
 #!/system/bin/sh
 # Optional: keep StarTube's stunnel tunnel running (YouTube button in Centaur).
 [ -x /data/local/tmp/stube_stunnel_watchdog.sh ] && (nohup sh /data/local/tmp/stube_stunnel_watchdog.sh >/dev/null 2>&1 &)
+# Boot fix: Centaur's native IO needs /dev/rtc0 to be world-writable, but
+# homeproxy starts the app before anything sets it. When the app starts without
+# the permission it crashes and leaves an "Application Error" dialog on screen
+# (and the microphone stays silent until the app is restarted). Fix the
+# permission and, if the dialog is up, restart the app once.
+chmod 666 /dev/rtc0 2>/dev/null
+(
+    sleep 15
+    TOP=$(dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)
+    case "$TOP" in
+        *"Application Error"*)
+            am force-stop ru.yandex.quasar.centaur_app >/dev/null 2>&1
+            sleep 2
+            # HOME, not "am start .../MainActivity": the direct activity launch
+            # can land on the Yandex ID login webview instead of the station UI.
+            input keyevent 3 >/dev/null 2>&1
+            ;;
+    esac
+) >/dev/null 2>&1 &
 # SberPortal: keep the native Sber assistant silent while Centaur (Alice) is
 # the active assistant.
 #
